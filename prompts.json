@@ -8,17 +8,13 @@
             "name": "google/flan-t5-xl",
             "resource": "https://huggingface.co/google/flan-t5-xl"
         },
+	{
+	    "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+            "resource": "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+	},
         {
-            "name": "google/gemma-2b-it",
-            "resource": "https://huggingface.co/google/gemma-2b-it"
-        },
-        {
-            "name": "google/gemma-7b-it",
-            "resource": "https://huggingface.co/google/gemma-7b-it"
-        },
-        {
-            "name": "allenai/OLMo-7B",
-            "resource": "https://huggingface.co/allenai/OLMo-7B"
+            "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+            "resource": "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
         },
         {
             "name": "ehartford/dolphin-2.1-mistral-7b",
@@ -29,16 +25,8 @@
             "resource": "https://huggingface.co/lvkaokao/mistral-7b-finetuned-orca-dpo-v2"
         },
         {
-            "name": "microsoft/Orca-2-13b",
-            "resource": "https://huggingface.co/microsoft/Orca-2-13b"
-        },
-        {
             "name": "meta-llama/Llama-2-7b-chat-hf",
             "resource": "https://huggingface.co/meta-llama/Llama-2-7b-chat-hf"
-        },
-        {
-            "name": "meta-llama/Llama-2-13b-chat-hf",
-            "resource": "https://huggingface.co/meta-llama/Llama-2-13b-chat-hf"
         },
         {
             "name": "meta-llama/Meta-Llama-3-8B",
@@ -57,22 +45,6 @@
             "resource": "https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct"
         },
         {
-            "name": "bigscience/bloomz-7b1",
-            "resource": "https://huggingface.co/bigscience/bloomz-7b1"
-        },
-        {
-            "name": "bigscience/bloomz-mt",
-            "resource": "https://huggingface.co/bigscience/bloomz-7b1-mt"
-        },
-        {
-            "name": "tiiuae/falcon-7b-instruct",
-            "resource": "https://huggingface.co/tiiuae/falcon-7b-instruct"
-        },
-        {
-            "name": "mosaicml/mpt-7b-instruct",
-            "resource": "https://huggingface.co/mosaicml/mpt-7b-instruct"
-        },
-        {
             "name": "lmsys/vicuna-13b-v1.5",
             "resource": "https://huggingface.co/lmsys/vicuna-13b-v1.5"
         },
@@ -85,52 +57,84 @@
             "resource": "https://huggingface.co/databricks/dolly-v2-3b"
         },
         {
+            "name": "o1",
+            "resource": "https://platform.openai.com/docs/models#o1",
+            "owner": "OpenAI"
+        },
+        {
+            "name": "o1-mini",
+            "resource": "https://platform.openai.com/docs/models#o1",
+            "owner": "OpenAI"
+        },
+        {
+            "name": "o1-preview",
+            "resource": "https://platform.openai.com/docs/models#o1",
+            "owner": "OpenAI"
+        },
+        {
             "name": "gpt-4o",
-            "resource": "https://platform.openai.com/docs/models/gpt-4o"
+            "resource": "https://platform.openai.com/docs/models/gpt-4o",
+            "owner": "OpenAI"
         },
         {
             "name": "gpt-4o-mini",
-            "resource": "https://platform.openai.com/docs/models/gpt-4o-mini"
+            "resource": "https://platform.openai.com/docs/models/gpt-4o-mini",
+            "owner": "OpenAI"
         },
         {
             "name": "gpt-4",
-            "resource": "https://platform.openai.com/docs/models/gpt-4"
+            "resource": "https://platform.openai.com/docs/models/gpt-4",
+            "owner": "OpenAI"
         },
         {
             "name": "gpt-4-turbo",
-            "resource": "https://platform.openai.com/docs/models/gpt-4"
+            "resource": "https://platform.openai.com/docs/models/gpt-4",
+            "owner": "OpenAI"
         },
         {
             "name": "gpt-3.5-turbo",
-            "resource": "https://platform.openai.com/docs/models/gpt-3-5"
+            "resource": "https://platform.openai.com/docs/models/gpt-3-5",
+            "owner": "OpenAI"
         },
         {
             "name": "gpt-3.5-turbo-instruct",
-            "resource": "https://platform.openai.com/docs/models/gpt-3-5"
+            "resource": "https://platform.openai.com/docs/models/gpt-3-5",
+            "owner": "OpenAI"
         },
         {
             "name": "babbage-002",
-            "resource": "https://platform.openai.com/docs/models/gpt-base"
+            "resource": "https://platform.openai.com/docs/models/gpt-base",
+            "owner": "OpenAI"
         },
         {
             "name": "davinci-002",
-            "resource": "https://platform.openai.com/docs/models/gpt-base"
+            "resource": "https://platform.openai.com/docs/models/gpt-base",
+            "owner": "OpenAI"
         },
         {
-            "name": "claude-3-5-sonnet-20240620",
-            "resource": "https://docs.anthropic.com/en/docs/about-claude/models"
+            "name": "claude-3-5-sonnet-latest",
+            "resource": "https://docs.anthropic.com/en/docs/about-claude/models",
+            "owner": "Anthropic"
         },
         {
-            "name": "claude-3-opus-20240229",
-            "resource": "https://docs.anthropic.com/en/docs/about-claude/models"
+            "name": "claude-3-5-haiku-latest",
+            "resource": "https://docs.anthropic.com/en/docs/about-claude/models",
+            "owner": "Anthropic"
         },
         {
-            "name": "claude-3-sonnet-20240229",
-            "resource": "https://docs.anthropic.com/en/docs/about-claude/models"
+            "name": "claude-3-opus-latest",
+            "resource": "https://docs.anthropic.com/en/docs/about-claude/models",
+            "owner": "Anthropic"
         },
         {
-            "name": "claude-3-haiku-20240307",
-            "resource": "https://docs.anthropic.com/en/docs/about-claude/models"
+            "name": "claude-3-sonnet-latest",
+            "resource": "https://docs.anthropic.com/en/docs/about-claude/models",
+            "owner": "Anthropic"
+        },
+        {
+            "name": "claude-3-haiku-latest",
+            "resource": "https://docs.anthropic.com/en/docs/about-claude/models",
+            "owner": "Anthropic"
         }
     ],
     "tasks": [

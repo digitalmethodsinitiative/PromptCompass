@@ -22,160 +22,10 @@ from transformers import AutoTokenizer, pipeline, AutoModelForSeq2SeqLM, AutoMod
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
-def prime_gpu_with_dummy_model():
-    """
-    Loads and unloads a small dummy model using session_state and standard unload functions.
-    
-    WHY? Because the FIRST model can cause memory to be allocated and not released properly. Additonal models seem 
-    to load and unload without issue. I cannot sort out why and even attempted to force devices. If a very large
-    model is loaded first, future models will not even use the GPU.
-
-    """
-    if os.environ.get('STREAMLIT_GPU_PRIMED') == 'true':
-        return
-
-    # Mark that this process is now executing the priming logic.
-    os.environ['STREAMLIT_GPU_PRIMED'] = 'true'
-
-    st.write("Attempting one-time GPU priming with a small Llama model using session_state...")
-    dummy_model_id = "google/flan-t5-small"
-    original_model_id_in_state = st.session_state.get('current_model_id') # Save if something was there
-
-    # Temporarily set current_model_id for the priming operation if needed by unload logic
-    st.session_state['current_model_id'] = dummy_model_id 
-
-    try:
-        st.write(f"Priming: Loading {dummy_model_id}...")
-
-        st.session_state['tokenizer'] = AutoTokenizer.from_pretrained(dummy_model_id)
-        st.session_state['model_instance'] = None
-        # AutoModelForCausalLM.from_pretrained(
-        #     dummy_model_id,
-        #     torch_dtype="auto",
-        #     device_map="auto"
-        # )
-        st.write(f"Priming: {dummy_model_id} model instance loaded.")
-
-        st.session_state['model_pipe'] = pipeline(
-            task='text-generation',
-            model=dummy_model_id,
-            tokenizer=st.session_state['tokenizer'],
-            torch_dtype="auto", # Model's dtype should be respected
-            device_map="auto",
-            num_return_sequences=1,
-            eos_token_id=st.session_state['tokenizer'].eos_token_id,
-            return_full_text=True
-        )
-        st.write(f"Priming: Pipeline for {dummy_model_id} created. Pipeline device: {st.session_state['model_pipe'].device}")
-
-        st.session_state['local_llm'] = HuggingFacePipeline(
-            pipeline=st.session_state['model_pipe']
-        )
-
-        # Create a dummy prompt and chain for completeness if unload_model_completely expects it
-        dummy_template = PromptTemplate(input_variables=["user_input"], template="Priming: {user_input}")
-        st.session_state['llm_chain'] = LLMChain(
-            llm=st.session_state['local_llm'], prompt=dummy_template
-        )
-        st.write(f"Priming: Dummy LLMChain created for {dummy_model_id}.")
-
-        # # Optionally, a tiny inference to ensure full initialization
-        st.session_state['llm_chain'].run("hello")
-        output = st.session_state['llm_chain'].run("hello")
-        st.write(f"Priming: Dummy inference complete for {dummy_model_id}.")
-
-        st.session_state.gpu_primed_this_session = True # Mark as success before unload
-        st.write(f"Priming: {dummy_model_id} fully loaded into session_state.")
-
-    except Exception as e:
-        st.error(f"Error during GPU priming with {dummy_model_id}: {e}")
-        st.session_state.gpu_primed_this_session = False # Mark as failed
-        # Clean up whatever might have been partially loaded into session_state
-        unload_model_completely(st.session_state) 
-        force_cuda_release() # Pass context if your function signature was updated
-    finally:
-        st.write(f"Priming: Unloading {dummy_model_id} using standard functions...")
-        # Call the standard unload functions which will use st.session_state
-        unload_model_completely(st.session_state)
-        force_cuda_release() # Pass context if your function signature was updated
-        
-        # Restore original current_model_id if it was saved
-        if original_model_id_in_state:
-            st.session_state['current_model_id'] = original_model_id_in_state
-        elif 'current_model_id' in st.session_state: # If priming set it and there was no original
-            st.session_state.pop('current_model_id', None)
-
-        if st.session_state.get('gpu_primed_this_session', False):
-            st.write("Priming: Dummy model unloaded and CUDA cache cleared via standard functions.")
-        else:
-            st.write("Priming: Cleanup attempted after priming failure.")
-
-def unload_model_completely(session_state):
-    """Unload model by breaking all reference cycles before deletion"""
-    llm_chain_obj = session_state.pop('llm_chain', None)
-    if llm_chain_obj:
-        if hasattr(llm_chain_obj, 'llm'): llm_chain_obj.llm = None
-        if hasattr(llm_chain_obj, 'prompt'): llm_chain_obj.prompt = None
-        del llm_chain_obj
-
-    local_llm_obj = session_state.pop('local_llm', None)
-    if local_llm_obj:
-        if hasattr(local_llm_obj, 'pipeline'): local_llm_obj.pipeline = None
-        del local_llm_obj
-    
-    model_pipe_obj = session_state.pop('model_pipe', None)
-    if model_pipe_obj:
-        # Break references the pipeline might hold
-        if hasattr(model_pipe_obj, 'model'): model_pipe_obj.model = None
-        if hasattr(model_pipe_obj, '_model'): model_pipe_obj._model = None # Some pipelines use _model
-        if hasattr(model_pipe_obj, 'tokenizer'): model_pipe_obj.tokenizer = None
-        if hasattr(model_pipe_obj, 'device'): model_pipe_obj.device = None
-        del model_pipe_obj
-
-    # Handle model_instance
-    model_instance_obj = session_state.pop('model_instance', None)
-    if model_instance_obj:
-        try:
-            # Attempt to move to CPU first
-            if hasattr(model_instance_obj, 'to') and hasattr(model_instance_obj, 'device') and model_instance_obj.device.type != 'cpu':
-                model_instance_obj.to('cpu')
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize() # Ensure move completes
-        except Exception as e:
-            st.warning(f"Failed to move model_instance to CPU during unload: {e}")
-        
-        # Clear internal modules if it's an nn.Module
-        if hasattr(model_instance_obj, '_modules'):
-            for key in list(model_instance_obj._modules.keys()):
-                model_instance_obj._modules[key] = None
-        del model_instance_obj
-
-    tokenizer_obj = session_state.pop('tokenizer', None)
-    if tokenizer_obj:
-        del tokenizer_obj
-
-    # Force garbage collection to break reference cycles
-    gc.collect()
-
-def force_cuda_release():
-    """Force aggressive CUDA memory release for a specific model type"""
-    if not torch.cuda.is_available():
-        return
-    try:
-        gc.collect() 
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize() 
-    except Exception as e:
-        st.warning(f"Advanced CUDA cleanup failed: {e}")
-
-def main():    
+def main():
     load_dotenv(".env")
 
-    if 'gpu_primed_this_session' not in st.session_state:
-        st.session_state.gpu_primed_this_session = False # Initialize if not present
-    if not st.session_state.gpu_primed_this_session:
-        prime_gpu_with_dummy_model()
-
+    pipe = None
     open_ai_key = None
     claude_api_key = None
     uploaded_file = None
@@ -213,19 +63,16 @@ def main():
     # load available models
     model_with_names = [
         model for model in promptlib['models'] if model['name']]
+
     # create input area for model selection
     input_values = {}
+
     input_values['model'] = st.selectbox('Select a model', model_with_names,
-                                         format_func=lambda x: '(Hosted by ' + x.get('owner', 'Digital Methods Initiative') + ') ' + x['name'])    # Check if model has changed and unload previous model if necessary
-    current_model_id = input_values['model']['name']
-    previous_model_id = st.session_state.get('current_model_id')
-    if previous_model_id and previous_model_id != current_model_id:
-        # Use our complete unloading function
-        unload_model_completely(st.session_state)
-        st.info(f"Unloaded previous model: {previous_model_id}")
-    
-    # Update the session state
-    st.session_state['current_model_id'] = current_model_id
+                                         format_func=lambda x: '(Hosted by ' + x.get('owner', 'Digital Methods Initiative') + ') ' + x['name'])
+
+    # If there is no previous state, set the default model as the first model
+    if not st.session_state.get('previous_model'):
+        st.session_state['previous_model'] = model_with_names[0]['name']
 
     st.caption(f"Model info: [{input_values['model']['name']}]({input_values['model']['resource']})" + (
         f". {input_values['model']['comment']}" if 'comment' in input_values['model'] else ""))
@@ -470,10 +317,10 @@ def main():
                                             llm = OpenAI(
                                                 model=model_id, openai_api_key=open_ai_key, **model_kwargs)
 
-                                        st.session_state['llm_chain'] = LLMChain(
+                                        llm_chain = LLMChain(
                                             llm=llm, prompt=prompt_template)
 
-                                        output = st.session_state['llm_chain'].run(user_input)
+                                        output = llm_chain.run(user_input)
 
                                         st.success("Input:  " + user_input + "  \n\n " +
                                                    "Output: " + output)
@@ -483,54 +330,54 @@ def main():
                                         cost = cb.total_cost
 
                                 elif model_id.startswith("deepseek") or model_id in ['meta-llama/Llama-2-7b-chat-hf', 'meta-llama/Llama-2-13b-chat-hf', 'meta-llama/Meta-Llama-3-8B', 'meta-llama/Meta-Llama-3.1-8B', 'meta-llama/Meta-Llama-3-8B-Instruct', 'meta-llama/Meta-Llama-3.1-8B-Instruct']:
-                                    if st.session_state.get('model_pipe') is None:
+                                    if pipe == None:
                                         with st.status('Loading model %s' % model_id) as status:
                                             # to use the llama-2 models,
                                             # you first need to get access to the llama-2 models via e.g. https://huggingface.co/meta-llama/Llama-2-7b-chat-hf
                                             # once accepted, get a hugging face auth token https://huggingface.co/settings/tokens
                                             # and then run `huggingface-cli login` on the command line, filling in the generated token
                                             if model_id in ['meta-llama/Llama-2-7b-chat-hf', 'meta-llama/Llama-2-13b-chat-hf', 'meta-llama/Meta-Llama-3-8B', 'meta-llama/Meta-Llama-3.1-8B', 'meta-llama/Meta-Llama-3-8B-Instruct', 'meta-llama/Meta-Llama-3.1-8B-Instruct']:
-                                                st.session_state['tokenizer'] = AutoTokenizer.from_pretrained(
+                                                tokenizer = AutoTokenizer.from_pretrained(
                                                     model_id, token=True)
                                             else:
-                                                st.session_state['tokenizer'] = AutoTokenizer.from_pretrained(
+                                                tokenizer = AutoTokenizer.from_pretrained(
                                                     model_id)
 
                                             if model_id == "meta-llama/Llama-2-13b-chat-hf":
-                                                st.session_state['model_pipe'] = pipeline(
+                                                pipe = pipeline(
                                                     "text-generation",
                                                     model=model_id,
-                                                    tokenizer=st.session_state['tokenizer'],
+                                                    tokenizer=tokenizer,
                                                     # torch_dtype="auto",
                                                     trust_remote_code=True,
                                                     device_map="auto",
                                                     num_return_sequences=1,
-                                                    eos_token_id=st.session_state['tokenizer'].eos_token_id,
+                                                    eos_token_id=tokenizer.eos_token_id,
                                                     **model_kwargs
                                                 )
                                             else:
-                                                st.session_state['model_pipe'] = pipeline(
+                                                pipe = pipeline(
                                                     "text-generation",
                                                     model=model_id,
-                                                    tokenizer=st.session_state['tokenizer'],
+                                                    tokenizer=tokenizer,
                                                     torch_dtype="auto",
                                                     trust_remote_code=True,
                                                     device_map="auto",
                                                     num_return_sequences=1,
-                                                    eos_token_id=st.session_state['tokenizer'].eos_token_id,
+                                                    eos_token_id=tokenizer.eos_token_id,
                                                     **model_kwargs
                                                 )
-                                            
-                                            st.session_state['local_llm'] = HuggingFacePipeline(
-                                                pipeline=st.session_state['model_pipe'])
+
+                                            local_llm = HuggingFacePipeline(
+                                                pipeline=pipe)
 
                                         status.update(
                                             label='Model %s loaded' % model_id, state="complete")
 
-                                    st.session_state['llm_chain'] = LLMChain(
-                                        llm=st.session_state['local_llm'], prompt=prompt_template)
+                                    llm_chain = LLMChain(
+                                        llm=local_llm, prompt=prompt_template)
 
-                                    output = st.session_state['llm_chain'].run(user_input)[len(prompt_template.format(user_input=user_input)):]
+                                    output = llm_chain.run(user_input)[len(prompt_template.format(user_input=user_input)):]
 
                                     # this is for deepseek - remove the "internal thoughts" from the output
                                     if "</think>" in output:
@@ -538,62 +385,57 @@ def main():
 
                                     st.success("Input:  " + user_input + "  \n\n " +
                                                "Output: " + output)
-                                    
                                 elif model_id in ['google/flan-t5-large', 'google/flan-t5-xl', 'google/gemma-2b-it', 'google/gemma-7b-it', 'tiiuae/falcon-7b-instruct', 'tiiuae/falcon-40b-instruct', 'databricks/dolly-v2-3b', 'databricks/dolly-v2-7b']:
-                                    if st.session_state.get('model_pipe') is None:
+                                    if pipe is None:
                                         with st.status('Loading model %s' % model_id) as status:
-                                            st.session_state['tokenizer'] = AutoTokenizer.from_pretrained(
+                                            tokenizer = AutoTokenizer.from_pretrained(
                                                 model_id)
 
                                             if model_id in ['google/flan-t5-large', 'google/flan-t5-xl']:
-                                                st.session_state['model_instance']  = AutoModelForSeq2SeqLM.from_pretrained( 
-                                                    model_id, 
-                                                    load_in_8bit=False, 
-                                                    device_map="auto",
-                                                    )
-                                                
-                                                st.session_state['model_pipe'] = pipeline(
+                                                model = AutoModelForSeq2SeqLM.from_pretrained(
+                                                    model_id, load_in_8bit=False, device_map='auto')
+                                                pipe = pipeline(
                                                     "text2text-generation",
-                                                    model=st.session_state['model_instance'],
-                                                    tokenizer=st.session_state['tokenizer'],
-                                                    # torch_dtype="auto",
-                                                    trust_remote_code=True,
-                                                    device_map="auto",
-                                                    num_return_sequences=1,
-                                                    eos_token_id=st.session_state['tokenizer'].eos_token_id,
-                                                    **model_kwargs
-                                                )
-                                            # elif model_id in ['tiiuae/falcon-7b-instruct', 'tiiuae/falcon-40b-instruct']:
-                                            else:
-                                                st.session_state['model_pipe'] = pipeline(
-                                                    "text-generation",
                                                     model=model_id,
-                                                    tokenizer=st.session_state['tokenizer'],
+                                                    tokenizer=tokenizer,
                                                     torch_dtype="auto",
                                                     trust_remote_code=True,
                                                     device_map="auto",
                                                     num_return_sequences=1,
-                                                    eos_token_id=st.session_state['tokenizer'].eos_token_id,
+                                                    eos_token_id=tokenizer.eos_token_id,
+                                                    **model_kwargs
+                                                )
+                                            # elif model_id in ['tiiuae/falcon-7b-instruct', 'tiiuae/falcon-40b-instruct']:
+                                            else:
+                                                pipe = pipeline(
+                                                    "text-generation",
+                                                    model=model_id,
+                                                    tokenizer=tokenizer,
+                                                    torch_dtype="auto",
+                                                    trust_remote_code=True,
+                                                    device_map="auto",
+                                                    num_return_sequences=1,
+                                                    eos_token_id=tokenizer.eos_token_id,
                                                     **model_kwargs
                                                 )
 
-                                            st.session_state['local_llm'] = HuggingFacePipeline(
-                                                pipeline=st.session_state['model_pipe'])
+                                            local_llm = HuggingFacePipeline(
+                                                pipeline=pipe)
                                             status.update(
                                                 label='Model %s loaded' % model_id, state="complete")
 
-                                    st.session_state['llm_chain'] = LLMChain(
-                                        llm=st.session_state['local_llm'], prompt=prompt_template)
+                                    llm_chain = LLMChain(
+                                        llm=local_llm, prompt=prompt_template)
 
-                                    output = st.session_state['llm_chain'].run(user_input)
+                                    output = llm_chain.run(user_input)
 
                                     st.success("Input:  " + user_input + "  \n\n " +
                                                "Output: " + output)
-                                                              
                                 elif model_id == "mosaicml/mpt-7b-instruct":
-                                    if st.session_state.get('model_pipe') is None:
-                                        with st.status('Loading model %s' % model_id) as status:                                            
-                                            st.session_state['model_instance'] = AutoModelForCausalLM.from_pretrained(
+                                    if pipe is None:
+                                        with st.status('Loading model %s' % model_id) as status:
+
+                                            model = AutoModelForCausalLM.from_pretrained(
                                                 model_id,
                                                 trust_remote_code=True,
                                                 torch_dtype=torch.bfloat16,
@@ -602,11 +444,11 @@ def main():
                                             )
 
                                             # MPT-7B model was trained using the EleutherAI/gpt-neox-20b tokenizer
-                                            st.session_state['tokenizer'] = AutoTokenizer.from_pretrained(
+                                            tokenizer = AutoTokenizer.from_pretrained(
                                                 "EleutherAI/gpt-neox-20b")
 
                                             # mtp-7b is trained to add "<|endoftext|>" at the end of generations
-                                            stop_token_ids = st.session_state['tokenizer'].convert_tokens_to_ids(
+                                            stop_token_ids = tokenizer.convert_tokens_to_ids(
                                                 ["<|endoftext|>"])
 
                                             # define custom stopping criteria object
@@ -618,39 +460,39 @@ def main():
                                                     return False
                                             stopping_criteria = StoppingCriteriaList(
                                                 [StopOnTokens()])
-                                            
-                                            st.session_state['model_pipe'] = pipeline(
+
+                                            pipe = pipeline(
                                                 task='text-generation',
-                                                model=st.session_state['model_instance'],
-                                                tokenizer=st.session_state['tokenizer'],
+                                                model=model,
+                                                tokenizer=tokenizer,
                                                 torch_dtype="auto",
                                                 device_map="auto",
                                                 num_return_sequences=1,
-                                                eos_token_id=st.session_state['tokenizer'].eos_token_id,
+                                                eos_token_id=tokenizer.eos_token_id,
                                                 **model_kwargs,
                                                 return_full_text=True,  # langchain expects the full text
                                                 stopping_criteria=stopping_criteria,  # without this model will ramble
                                                 repetition_penalty=1.1  # without this output begins repeating
                                             )
 
-                                            st.session_state['local_llm'] = HuggingFacePipeline(
-                                                pipeline=st.session_state['model_pipe'])
+                                            local_llm = HuggingFacePipeline(
+                                                pipeline=pipe)
 
                                         status.update(
                                             label='Model %s loaded' % model_id, state="complete")
 
-                                    st.session_state['llm_chain'] = LLMChain(
-                                        llm=st.session_state['local_llm'], prompt=prompt_template)
+                                    llm_chain = LLMChain(
+                                        llm=local_llm, prompt=prompt_template)
 
-                                    output = st.session_state['llm_chain'].run(user_input)
+                                    output = llm_chain.run(user_input)
 
                                     st.success("Input:  " + user_input + "  \n\n " +
                                                "Output: " + output)
-                                
                                 elif model_id == "allenai/OLMo-7B" or model_id == "ehartford/dolphin-2.1-mistral-7b" or model_id == "lvkaokao/mistral-7b-finetuned-orca-dpo-v2" or model_id == "lmsys/vicuna-13b-v1.5" or model_id == "microsoft/Orca-2-13b":
-                                    if st.session_state.get('model_pipe') is None:
+                                    if pipe is None:
                                         with st.status('Loading model %s' % model_id) as status:
-                                            st.session_state['model_instance'] = AutoModelForCausalLM.from_pretrained(
+
+                                            model = AutoModelForCausalLM.from_pretrained(
                                                 model_id,
                                                 trust_remote_code=True,
                                                 torch_dtype=torch.bfloat16,
@@ -658,46 +500,45 @@ def main():
                                             )
 
                                             if model_id == "ehartford/dolphin-2.1-mistral-7b":
-                                                st.session_state['tokenizer'] = AutoTokenizer.from_pretrained(
+                                                tokenizer = AutoTokenizer.from_pretrained(
                                                     model_id, use_fast=False)
                                             else:
-                                                st.session_state['tokenizer'] = AutoTokenizer.from_pretrained(
+                                                tokenizer = AutoTokenizer.from_pretrained(
                                                     model_id)
 
-                                            st.session_state['model_pipe'] = pipeline(
+                                            pipe = pipeline(
                                                 task='text-generation',
-                                                model=st.session_state['model_instance'],
-                                                tokenizer=st.session_state['tokenizer'],
+                                                model=model,
+                                                tokenizer=tokenizer,
                                                 torch_dtype="auto",
                                                 device_map="auto",
                                                 num_return_sequences=1,
-                                                eos_token_id=st.session_state['tokenizer'].eos_token_id,
+                                                eos_token_id=tokenizer.eos_token_id,
                                                 **model_kwargs,
                                                 return_full_text=True,  # langchain expects the full text
                                             )
 
-                                            st.session_state['local_llm'] = HuggingFacePipeline(
-                                                pipeline=st.session_state['model_pipe'])
+                                            local_llm = HuggingFacePipeline(
+                                                pipeline=pipe)
 
                                         status.update(
                                             label='Model %s loaded' % model_id, state="complete")
 
-                                    st.session_state['llm_chain'] = LLMChain(
-                                        llm=st.session_state['local_llm'], prompt=prompt_template)
+                                    llm_chain = LLMChain(
+                                        llm=local_llm, prompt=prompt_template)
 
-                                    output = st.session_state['llm_chain'].run(user_input)
+                                    output = llm_chain.run(user_input)
 
                                     st.success("Input:  " + user_input + "  \n\n " +
                                                "Output: " + output)
-                                
                                 else:
                                     st.error("Model %s not found" % model_id)
                                     exit(1)
-                                    
+
                                 if not num_prompt_tokens or not num_completion_tokens:
-                                    num_prompt_tokens = len(st.session_state['tokenizer'].tokenize(
+                                    num_prompt_tokens = len(tokenizer.tokenize(
                                         prompt_template.format(user_input=user_input)))
-                                    num_completion_tokens = len(st.session_state['tokenizer'].tokenize(
+                                    num_completion_tokens = len(tokenizer.tokenize(
                                         output))
 
                                 # Prepare data as dictionary
@@ -747,22 +588,32 @@ def main():
                     st.write("End time: " +
                              time.strftime("%H:%M:%S", time.localtime()))
                     st.write("Elapsed time: " +
-                             str(round(elapsed_time, 2)) + " seconds")                
-                
+                             str(round(elapsed_time, 2)) + " seconds")
+
                 except Exception as e:
                     t = traceback.format_exception(e)
                     st.error(f"Exception encountered: {type(e).__name__} / {e}<br><br>{'<br>'.join(t)}")
-                
+
                 finally:
-                    # Explicitly delete objects that hold references to session_state components
-                    if 'llm' in locals() and llm is not None: # For OpenAI/Anthropic models
+                    # free up variables
+                    if 'data' in locals() and data is not None:
+                        del data
+                    if 'pipe' in locals() and pipe is not None:
+                        del pipe
+                    if 'llm_chain' in locals() and llm_chain is not None:
+                        del llm_chain
+                    if 'llm' in locals() and llm is not None:
                         del llm
-                    
-                    # Use our complete unloading function
-                    unload_model_completely(st.session_state)
-                    force_cuda_release()
-                    st.info("Model and memory cleanup complete.")
-                   
+                    if 'local_llm' in locals() and local_llm is not None:
+                        del local_llm
+                    if 'model' in locals() and model is not None:
+                        del model
+                    if 'tokenizer' in locals() and tokenizer is not None:
+                        del tokenizer
+                    gc.collect()  # garbage collection
+                    # empty cuda cache
+                    torch.cuda.empty_cache()
+
 
 if __name__ == "__main__":
     main()
