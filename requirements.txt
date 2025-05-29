@@ -4,16 +4,17 @@ python_dotenv
 langchain
 openai
 langchain-anthropic
+langchain_community
 
-tiktoken
+# tiktoken
 transformers
 torch
 accelerate 
-bitsandbytes
-scipy
+# bitsandbytes
+# scipy
 
-einops
-xformers
+# einops
+# xformers
 
-ai2-olmo
-sentencepiece
+# ai2-olmo
+# sentencepiece
